@@ -482,9 +482,26 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
     // Send three gesture events--began, changed, and ended
     // If we only send two then mission control doesn't work.
-    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, velocity);
+    //
+    // On macOS 27 beta builds, the Dock drops dock-swipe phases that are
+    // posted back-to-back, so the augmented (serialized IOHID) path spaces
+    // the phases a few ms apart. Pre-27 behavior is unchanged.
+    const useconds_t phaseDelay = iss_requires_event_augmentation() ? 10000 : 0;
+
+    if (!iss_post_dock_swipe(kCGSGesturePhaseBegan, direction, velocity)) {
+        return false;
+    }
+    if (phaseDelay) usleep(phaseDelay);
+
+    if (!iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)) {
+        return false;
+    }
+    if (phaseDelay) usleep(phaseDelay);
+
+    if (!iss_post_dock_swipe(kCGSGesturePhaseEnded, direction, velocity)) {
+        return false;
+    }
+    return true;
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result
