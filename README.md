@@ -4,12 +4,11 @@ Native instant workspace switching on macOS. No more waiting for animations.
 
 This local build defaults to **Fast**, to keep a visible sliding transition.
 This default applies to both the app and CLI. Adjust it in the app under
-**Settings → Animation**. This tab includes a curve graph and an animated local
-preview, speed presets, a custom duration slider (**80–1000 ms**), and separate
+**Settings → Animation**. This tab includes a live curve graph, speed presets, a custom duration slider (**80–1000 ms**), and separate
 **Ease in** / **Ease out** sliders (**0–50%** of the slide time each).
 Curve presets are **Gentle** (the current 10%/10% curve), **Linear**, **Ease In**,
 **Ease Out**, and **Smooth**. Changes save automatically and apply to the next
-slide. **Reset to Gentle + Fast** restores the accepted 220 ms behavior.
+slide. **Gentle** with **Fast** uses the accepted 220 ms behavior.
 Instant disables curve controls; select another speed to edit them.
 Animated presets now drive swipe progress over a fixed interval, with constant
 speed through the middle 80% and brief easing at either end. The target durations

@@ -1,54 +1,25 @@
 import AppKit
 import ISS
 
-/// A local motion sample; never changes Spaces or needs Accessibility access.
+/// A graph of the timing curve used by the gesture driver.
 final class AnimationCurvePreview: NSView {
   var settings = AnimationSettings() { didSet { needsDisplay = true } }
-  private var timer: Timer?
-  private var started = 0.0
-  private var time = 0.0
-
-  override var intrinsicContentSize: NSSize { NSSize(width: 380, height: 190) }
+  override var intrinsicContentSize: NSSize { NSSize(width: 380, height: 155) }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     setAccessibilityElement(true)
     setAccessibilityRole(.image)
-    setAccessibilityLabel("Animation curve and motion preview")
+    setAccessibilityLabel("Animation timing curve")
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-  func playIfIdle() { if timer == nil { play() } }
-
-  func play() {
-    stop()
-    time = 0
-    started = ProcessInfo.processInfo.systemUptime
-    let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      let elapsed = ProcessInfo.processInfo.systemUptime - self.started
-      self.time = self.settings.isInstant ? 1 : min(1, elapsed / self.settings.duration)
-      self.needsDisplay = true
-      if self.time >= 1 { self.stop() }
-    }
-    self.timer = timer
-    RunLoop.main.add(timer, forMode: .common)
-    needsDisplay = true
-  }
-
-  func stop() {
-    timer?.invalidate()
-    timer = nil
-  }
-
-  deinit { timer?.invalidate() }
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
     NSColor.controlBackgroundColor.setFill()
     NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 10, yRadius: 10).fill()
-    let plot = NSRect(x: 36, y: 66, width: bounds.width - 54, height: bounds.height - 91)
+    let plot = NSRect(x: 36, y: 30, width: bounds.width - 54, height: bounds.height - 55)
     NSColor.separatorColor.withAlphaComponent(0.4).setStroke()
     let grid = NSBezierPath()
     for i in 0...4 {
@@ -77,15 +48,5 @@ final class AnimationCurvePreview: NSView {
     curve.lineWidth = 2.5
     curve.stroke()
 
-    let progress = settings.isInstant ? time : iss_animation_progress(time, settings.easeIn, settings.easeOut)
-    let dot = NSRect(x: plot.minX + time * plot.width - 4, y: plot.minY + progress * plot.height - 4, width: 8, height: 8)
-    NSColor.controlAccentColor.setFill()
-    NSBezierPath(ovalIn: dot).fill()
-    let track = NSRect(x: 18, y: 14, width: bounds.width - 36, height: 28)
-    NSColor.quaternaryLabelColor.setFill()
-    NSBezierPath(roundedRect: track, xRadius: 6, yRadius: 6).fill()
-    let card = NSRect(x: track.minX + progress * (track.width - 42), y: track.minY + 3, width: 42, height: 22)
-    NSColor.controlAccentColor.setFill()
-    NSBezierPath(roundedRect: card, xRadius: 4, yRadius: 4).fill()
   }
 }

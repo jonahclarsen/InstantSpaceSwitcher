@@ -44,18 +44,6 @@ final class AnimationSettingsViewController: NSViewController {
     form.addRow(label: NSTextField(labelWithString: "Ease out:"), control: sliderRow(endSlider, endValue))
     form.addRow(label: nil, control: preview)
 
-    let previewButton = NSButton(title: "Preview", target: self, action: #selector(playPreview))
-    let resetButton = NSButton(title: "Reset to Gentle + Fast", target: self, action: #selector(resetSettings))
-    previewButton.bezelStyle = .rounded
-    resetButton.bezelStyle = .rounded
-    let buttons = NSStackView(views: [previewButton, resetButton])
-    buttons.spacing = 8
-    form.addRow(label: nil, control: buttons)
-    let hint = NSTextField(wrappingLabelWithString: "Changes save automatically. A little ease out gives a crisp finish; more creates a softer landing.")
-    hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-    hint.textColor = .secondaryLabelColor
-    hint.widthAnchor.constraint(equalToConstant: 380).isActive = true
-    form.addRow(label: nil, control: hint)
     updateControls()
   }
 
@@ -63,11 +51,6 @@ final class AnimationSettingsViewController: NSViewController {
     super.viewWillAppear()
     settings = .load()
     updateControls()
-  }
-
-  override func viewWillDisappear() {
-    preview.stop()
-    super.viewWillDisappear()
   }
 
   private func sliderRow(_ slider: NSSlider, _ value: NSTextField) -> NSView {
@@ -98,9 +81,7 @@ final class AnimationSettingsViewController: NSViewController {
   private func changed() {
     settings.save()
     updateControls()
-    // Repaint the curve immediately without repeatedly restarting the moving
-    // sample during a continuous slider drag.
-    preview.playIfIdle()
+
   }
 
   @objc private func speedChanged() {
@@ -134,10 +115,4 @@ final class AnimationSettingsViewController: NSViewController {
     changed()
   }
 
-  @objc private func playPreview() { preview.play() }
-
-  @objc private func resetSettings() {
-    settings = AnimationSettings()
-    changed()
-  }
 }
