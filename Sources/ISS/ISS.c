@@ -426,19 +426,33 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
-static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
-    const bool isRight = (direction == ISSDirectionRight);
-    
-    // On macOS 27 the Dock server's interpretation of positive/negative
-    // progress and velocity is inverted relative to the app's internal
-    // direction model. Flip the sign for the augmented path only.
-    const double progress = iss_requires_event_augmentation()
-                                ? (isRight ? -0.000016 : 0.000016)
-                                : (isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN);
+// On macOS 27 the Dock applies the "Natural scrolling" trackpad preference to
+// synthetic horizontal swipes: with it enabled, progress and velocity must be
+// negated relative to the legacy convention; with it disabled, the legacy sign
+// applies. Physical swipes read by the event tap are unaffected.
+static bool iss_natural_scrolling_enabled(void) {
+    // Synchronize so a change made in System Settings is seen immediately.
+    CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+    Boolean valid = false;
+    Boolean enabled = CFPreferencesGetAppBooleanValue(
+        CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication, &valid);
+    // Unset means the system default, which is natural scrolling.
+    return valid ? enabled : true;
+}
+
+static bool iss_should_invert_synthetic_swipe(void) {
+    return iss_requires_event_augmentation() && iss_natural_scrolling_enabled();
+}
+
+static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction,
+                                double velocity, bool invert) {
+    const double sign = ((direction == ISSDirectionRight) ? 1.0 : -1.0) * (invert ? -1.0 : 1.0);
+    const double progress = sign * (iss_requires_event_augmentation()
+                                        ? 0.000016
+                                        : (double)FLT_TRUE_MIN);
 
     // Velocity of gesture based on speed setting
-    const double vel = isRight ? velocity : -velocity;
-    const double modernVel = isRight ? -velocity : velocity;
+    const double vel = sign * velocity;
 
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) {
@@ -459,7 +473,7 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
 
         // Match FasterSwiper: only the Ended event carries velocity.
         if (phase == kCGSGesturePhaseEnded) {
-            CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, modernVel);
+            CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
         }
 
         CGEventRef augmented = iss_augment_dock_swipe_event(ev);
@@ -487,18 +501,19 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) 
     // posted back-to-back, so the augmented (serialized IOHID) path spaces
     // the phases a few ms apart. Pre-27 behavior is unchanged.
     const useconds_t phaseDelay = iss_requires_event_augmentation() ? 10000 : 0;
+    const bool invert = iss_should_invert_synthetic_swipe();
 
-    if (!iss_post_dock_swipe(kCGSGesturePhaseBegan, direction, velocity)) {
+    if (!iss_post_dock_swipe(kCGSGesturePhaseBegan, direction, velocity, invert)) {
         return false;
     }
     if (phaseDelay) usleep(phaseDelay);
 
-    if (!iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)) {
+    if (!iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity, invert)) {
         return false;
     }
     if (phaseDelay) usleep(phaseDelay);
 
-    if (!iss_post_dock_swipe(kCGSGesturePhaseEnded, direction, velocity)) {
+    if (!iss_post_dock_swipe(kCGSGesturePhaseEnded, direction, velocity, invert)) {
         return false;
     }
     return true;
