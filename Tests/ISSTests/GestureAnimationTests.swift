@@ -81,10 +81,13 @@ final class GestureAnimationTests: XCTestCase {
     XCTAssertTrue(samples.dropFirst(3).allSatisfy { $0.progress <= 0 })
   }
 
-  func testInstantKeepsOriginalThreeEventSequence() {
+  func testInstantSendsThreeEventSequenceWithFullTravelAfterBegan() {
     XCTAssertTrue(startAnimation(ISSDirectionLeft, 2000, captureSwipe))
     XCTAssertEqual(samples.map(\.phase), [1, 2, 4])
-    XCTAssertTrue(samples.allSatisfy { abs($0.progress) < 1e-30 && $0.velocity == -2000 })
+    XCTAssertTrue(samples.allSatisfy { $0.velocity == -2000 })
+    XCTAssertLessThan(samples[0].progress, 0)
+    XCTAssertLessThan(abs(samples[0].progress), 1e-30)
+    XCTAssertEqual(samples.dropFirst().map(\.progress), [-1, -1])
     iss_wait_for_pending_switch()
     XCTAssertEqual(samples.count, 3)
   }

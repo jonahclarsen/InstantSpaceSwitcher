@@ -483,6 +483,31 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
+/** @brief Swipe progress for a given gesture phase.
+ *
+ * Began carries a near-zero progress (±FLT_TRUE_MIN) so no intermediate frame
+ * is drawn. Changed and Ended carry the full ±1.0 travel.
+ *
+ * WindowServer builds the destination space's compositing surfaces as swipe
+ * progress advances. A gesture that commits with ~zero travel (progress ≈ 0 on
+ * every phase, high velocity) lands on a space whose surfaces were never built:
+ * the windows are still in the window list but do not paint until Mission
+ * Control or an app activation forces a redraw ("all windows invisible",
+ * issue #58). Carrying the full progress on Changed makes WindowServer build
+ * the surfaces before the commit. The switch is still instant.
+ *
+ * Measured on macOS 26.6.2 (M4 Pro) with a screencapture-based probe
+ * (`screencapture -l <wid>` fails with "could not create image from window"
+ * when a window is wedged): progress ±FLT_TRUE_MIN on all phases wedged
+ * 15/31 window probes; ±FLT_TRUE_MIN on Began + ±1.0 on Changed/Ended
+ * wedged 0/18.
+ */
+double iss_swipe_progress_for_phase(CGSGesturePhase phase, ISSDirection direction) {
+    const bool isRight = (direction == ISSDirectionRight);
+    const double magnitude = (phase == kCGSGesturePhaseBegan) ? (double)FLT_TRUE_MIN : 1.0;
+    return isRight ? magnitude : -magnitude;
+}
+
 // One gesture at a time, on the main run loop. New requests finish the current
 // slide first, so repeated shortcuts cannot build up a queue of animations.
 // Dock progress is gesture travel, not a normalized desktop position. In the
@@ -610,11 +635,14 @@ bool iss_start_switch_animation(ISSDirection direction, double speed, void (*pos
     animation.destinationPosted = false;
 
     if (speed >= 2000.0) {
-        // Preserve the original three-event instant gesture, including its
-        // tiny signed progress. Mission Control needs the changed phase.
-        iss_emit_swipe(kCGSGesturePhaseBegan, FLT_TRUE_MIN, speed);
-        iss_emit_swipe(kCGSGesturePhaseChanged, FLT_TRUE_MIN, speed);
-        iss_emit_swipe(kCGSGesturePhaseEnded, FLT_TRUE_MIN, speed);
+        // Instant three-event gesture. Mission Control needs the changed
+        // phase; see iss_swipe_progress_for_phase for the progress values.
+        const CGSGesturePhase phases[] = {
+            kCGSGesturePhaseBegan, kCGSGesturePhaseChanged, kCGSGesturePhaseEnded,
+        };
+        for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
+            iss_emit_swipe(phases[i], fabs(iss_swipe_progress_for_phase(phases[i], direction)), speed);
+        }
         CFRelease(animation.event);
         animation.event = NULL;
         return true;
