@@ -6,62 +6,76 @@ import ISS
 @_silgen_name("_AXUIElementGetWindow")
 private func axWindowID(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
-// Snapshot the order for the entire Command hold; activation changes cannot
-// reshuffle it while the user is cycling.
-struct CommandTabSelection {
-  let count: Int
-  private(set) var index = 0
+// The native chooser receives every key except its final commit event. Keeping
+// this routing separate makes it possible to verify that we preserve its controls.
+struct NativeCommandTabInput {
+  enum Action: Equatable { case pass, holdRelease, buffer, flushAndPass }
+  private(set) var choosing = false
+  private(set) var deferring = false
 
-  mutating func advance(backward: Bool) {
-    guard count > 0 else { return }
-    index = (index + (backward ? count - 1 : 1)) % count
+  mutating func route(_ type: CGEventType, key: Int64, flags: CGEventFlags) -> Action {
+    if deferring {
+      if [.keyDown, .keyUp, .flagsChanged].contains(type) { return .buffer }
+      if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(type) {
+        reset()
+        return .flushAndPass
+      }
+      return .pass
+    }
+    if type == .keyDown, key == kVK_Tab, flags.contains(.maskCommand),
+      !flags.contains(.maskAlternate), !flags.contains(.maskControl) {
+      choosing = true
+    } else if type == .keyDown, key == kVK_Escape {
+      choosing = false
+    } else if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(type) {
+      choosing = false // Native mouse selection proceeds normally.
+    } else if type == .flagsChanged, !flags.contains(.maskCommand) {
+      // Option-on-release has special native minimized-window behavior.
+      let shouldHold = choosing && !flags.contains(.maskAlternate) && !flags.contains(.maskControl)
+      choosing = false
+      if shouldHold {
+        deferring = true
+        return .holdRelease
+      }
+    }
+    return .pass
+  }
+
+  mutating func reset() {
+    choosing = false
+    deferring = false
   }
 }
 
 @MainActor
 final class CommandTabSwitcher {
   static let shared = CommandTabSwitcher()
+  private static let replayTag: Int64 = 0x495353434D445442
   private var tap: CFMachPort?
   private var source: CFRunLoopSource?
-  private var observer: Any?
   private var retry: DispatchWorkItem?
-  private var recent: [pid_t] = []
-  private var apps: [NSRunningApplication] = []
-  private var selection: CommandTabSelection?
-  private var holdingCommand = false
-  private var cancelledHold = false
+  private var input = NativeCommandTabInput()
+  private var release: CGEvent?
+  private var buffered: [CGEvent] = []
+  private var destination: NSRunningApplication?
   private var generation = 0
-  private var panel: NSPanel?
 
   func start() {
-    if observer == nil {
-      if let front = NSWorkspace.shared.frontmostApplication { remember(front) }
-      observer = NSWorkspace.shared.notificationCenter.addObserver(
-        forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-      ) { [weak self] notification in
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        MainActor.assumeIsolated { self?.remember(app) }
-      }
-    }
     setEnabled(UserDefaults.standard.object(forKey: "commandTabOverride") as? Bool ?? true)
   }
 
-  func stop() {
-    setEnabled(false)
-    if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
-    observer = nil
-  }
+  func stop() { setEnabled(false) }
 
   func setEnabled(_ enabled: Bool) {
     retry?.cancel()
     retry = nil
-    cancel()
+    flushRelease()
     if let tap { CFMachPortInvalidate(tap) }
     if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
     tap = nil
     source = nil
     guard enabled else { return }
-    let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .rightMouseDown]
+    let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]
     let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
     tap = CGEvent.tapCreate(
       tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -73,8 +87,6 @@ final class CommandTabSwitcher {
         }
       }, userInfo: Unmanaged.passUnretained(self).toOpaque())
     guard let tap else {
-      // Accessibility may be granted after launch. Native Command-Tab remains
-      // available until a tap can actually be installed.
       let work = DispatchWorkItem { [weak self] in self?.setEnabled(true) }
       retry = work
       DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
@@ -84,172 +96,171 @@ final class CommandTabSwitcher {
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
   }
 
-  private func remember(_ app: NSRunningApplication) {
-    guard app.activationPolicy == .regular else { return }
-    recent.removeAll { $0 == app.processIdentifier }
-    recent.insert(app.processIdentifier, at: 0)
-    let running = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
-    recent.removeAll { !running.contains($0) }
-  }
-
   private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    if event.getIntegerValueField(.eventSourceUserData) == Self.replayTag {
+      return Unmanaged.passUnretained(event)
+    }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-      cancel()
+      flushRelease()
       if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
       return Unmanaged.passUnretained(event)
     }
-    guard !ShortcutRecorderControl.isAnyRecording else { return Unmanaged.passUnretained(event) }
-    let key = event.getIntegerValueField(.keyboardEventKeycode)
-    if type == .keyDown, key == kVK_Tab, event.flags.contains(.maskCommand),
-      !event.flags.contains(.maskAlternate), !event.flags.contains(.maskControl) {
-      holdingCommand = true
-      if cancelledHold { return nil }
-      let backward = event.flags.contains(.maskShift)
-      // Keep all AppKit/AX work outside the event-tap callback.
-      DispatchQueue.main.async { self.advance(backward: backward) }
-      return nil
+    if ShortcutRecorderControl.isAnyRecording {
+      flushRelease()
+      return Unmanaged.passUnretained(event)
     }
-    if type == .keyUp, key == kVK_Tab, holdingCommand { return nil }
-    if type == .flagsChanged, holdingCommand, !event.flags.contains(.maskCommand) {
-      holdingCommand = false
-      cancelledHold = false
-      DispatchQueue.main.async { self.commit() }
-    } else if holdingCommand, type == .keyDown, key == kVK_Escape {
-      cancelledHold = true
-      // Consume Tab until Command is released, even after cancelling.
-      DispatchQueue.main.async { self.cancel(keepCommand: true) }
-      return nil
-    } else if type == .leftMouseDown || type == .rightMouseDown {
-      DispatchQueue.main.async { self.cancel() }
-    }
-    // Unsupported chooser shortcuts must not reach the previous application
-    // (for example Command-Q must not accidentally quit it).
-    if holdingCommand, type == .keyDown || type == .keyUp { return nil }
-    return Unmanaged.passUnretained(event)
-  }
-
-  private func advance(backward: Bool) {
-    if selection == nil {
-      generation += 1 // Cancel any pending activation from an earlier switch.
-      if let front = NSWorkspace.shared.frontmostApplication { remember(front) }
-      apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated }
-      apps.sort {
-        let left = recent.firstIndex(of: $0.processIdentifier) ?? Int.max
-        let right = recent.firstIndex(of: $1.processIdentifier) ?? Int.max
-        if left != right { return left < right }
-        return ($0.localizedName ?? "") < ($1.localizedName ?? "")
+    switch input.route(type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags) {
+    case .pass:
+      return Unmanaged.passUnretained(event)
+    case .holdRelease:
+      guard let copy = event.copy() else {
+        input.reset()
+        return Unmanaged.passUnretained(event)
       }
-      selection = CommandTabSelection(count: apps.count)
+      release = copy
+      generation += 1
+      let ticket = generation
+      // AX calls must never block the event-tap callback. Dock still sees
+      // Command as held, so its actual selection remains available to query.
+      DispatchQueue.main.async { self.prepareRelease(ticket: ticket) }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        if ticket == self.generation { self.flushRelease() }
+      }
+      return nil
+    case .buffer:
+      guard buffered.count < 128, let copy = event.copy() else {
+        flushRelease()
+        return Unmanaged.passUnretained(event)
+      }
+      buffered.append(copy)
+      return nil
+    case .flushAndPass:
+      flushRelease()
+      return Unmanaged.passUnretained(event)
     }
-    selection?.advance(backward: backward)
-    showChooser()
   }
 
-  private func cancel(keepCommand: Bool = false) {
+  private func flushRelease() {
+    let app = destination
+    destination = nil
+    let events = (release.map { [$0] } ?? []) + buffered
+    release = nil
+    buffered = []
+    input.reset()
     generation += 1
-    selection = nil
-    apps = []
-    if !keepCommand {
-      holdingCommand = false
-      cancelledHold = false
+    // The same app selected in the native chooser receives the final focus.
+    // Unresolved selections leave the chooser open for the real release instead.
+    app?.activate(options: [.activateIgnoringOtherApps])
+    // Replay the real release and any following typing in its original order.
+    for event in events {
+      event.setIntegerValueField(.eventSourceUserData, value: Self.replayTag)
+      event.timestamp = DispatchTime.now().uptimeNanoseconds
+      event.post(tap: .cgSessionEventTap)
     }
-    panel?.orderOut(nil)
   }
 
-  private func commit() {
-    guard let selection, apps.indices.contains(selection.index) else { cancel(); return }
-    let app = apps[selection.index]
-    cancel()
-    guard !app.isTerminated else { return }
-    let ticket = generation
-    let element = AXUIElementCreateApplication(app.processIdentifier)
-    AXUIElementSetMessagingTimeout(element, 0.2)
-    var window: CFTypeRef?
-    var windowID: CGWindowID = 0
-    for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
-      if AXUIElementCopyAttributeValue(element, attribute as CFString, &window) == .success,
-        let window, CFGetTypeID(window) == AXUIElementGetTypeID(),
-        axWindowID(window as! AXUIElement, &windowID) == .success { break }
-    }
-    // Windowless apps and unsupported AX implementations retain normal activation.
-    guard windowID != 0 else {
-      app.activate(options: [.activateIgnoringOtherApps])
+  private func prepareRelease(ticket: Int, selectionDeadline: TimeInterval? = nil) {
+    guard ticket == generation, release != nil else { return }
+    guard AXIsProcessTrusted() else { flushRelease(); return }
+    // A quick tap may release Command before Dock has created its AX list.
+    // Holding the release gives the native chooser a short chance to expose it.
+    let deadline = selectionDeadline ?? (ProcessInfo.processInfo.systemUptime + 0.12)
+    guard let selected = selectedDestination() else {
+      if ProcessInfo.processInfo.systemUptime < deadline {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+          self.prepareRelease(ticket: ticket, selectionDeadline: deadline)
+        }
+      } else {
+        flushRelease()
+      }
       return
     }
+    let windowID = selected.windowID
     if !iss_has_pending_switch(), iss_window_is_on_active_space(windowID) {
-      app.activate(options: [.activateIgnoringOtherApps])
+      flushRelease()
       return
     }
-    guard iss_switch_to_window(windowID) else {
-      app.activate(options: [.activateIgnoringOtherApps])
+    // Close the native chooser only after the user has released Command and
+    // its exact selection has been read. Dock can then accept Space gestures.
+    // Never synthesize Escape when selection lookup failed.
+    guard let escapeDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Escape), keyDown: true),
+      let escapeUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Escape), keyDown: false) else {
+      flushRelease()
       return
     }
-    finishActivation(app, windowID: windowID, ticket: ticket,
-                     deadline: ProcessInfo.processInfo.systemUptime + 2)
+    destination = selected.app
+    for escape in [escapeDown, escapeUp] {
+      escape.flags = .maskCommand
+      escape.setIntegerValueField(.eventSourceUserData, value: Self.replayTag)
+      escape.post(tap: .cgSessionEventTap)
+    }
+    guard iss_switch_to_window(windowID) else { flushRelease(); return }
+    waitForSpace(windowID: windowID, ticket: ticket)
   }
 
-  private func finishActivation(_ app: NSRunningApplication, windowID: CGWindowID,
-                                ticket: Int, deadline: TimeInterval) {
-    guard ticket == generation, !app.isTerminated else { return }
+  private func waitForSpace(windowID: CGWindowID, ticket: Int) {
+    guard ticket == generation, release != nil else { return }
     if !iss_has_pending_switch(), iss_window_is_on_active_space(windowID) {
       // Let Dock consume the gesture release before requesting window focus.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-        guard ticket == self.generation else { return }
-        app.activate(options: [.activateIgnoringOtherApps])
+        if ticket == self.generation { self.flushRelease() }
       }
-    } else if ProcessInfo.processInfo.systemUptime >= deadline {
-      app.activate(options: [.activateIgnoringOtherApps])
     } else {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-        self.finishActivation(app, windowID: windowID, ticket: ticket, deadline: deadline)
+        self.waitForSpace(windowID: windowID, ticket: ticket)
       }
     }
   }
 
-  private func showChooser() {
-    guard let selection, !apps.isEmpty else { return }
-    let screen = NSScreen.main ?? NSScreen.screens.first
-    let width = min(CGFloat(apps.count) * 84 + 32, (screen?.visibleFrame.width ?? 900) - 80)
-    if panel == nil {
-      panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-      panel?.level = .popUpMenu
-      panel?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-      panel?.isOpaque = false
-      panel?.backgroundColor = .clear
-      panel?.hasShadow = true
-      panel?.hidesOnDeactivate = false
+  private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+    return value
+  }
+
+  private func selectedDestination() -> (app: NSRunningApplication, windowID: CGWindowID)? {
+    guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
+    let element = AXUIElementCreateApplication(dock.processIdentifier)
+    AXUIElementSetMessagingTimeout(element, 0.05)
+    // Inspect the real process switcher list, never infer its MRU order. Prefer
+    // direct children before examining containers so the Dock icon list is cheap.
+    var level = attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+    var switcher: AXUIElement?
+    let deadline = ProcessInfo.processInfo.systemUptime + 0.15
+    for _ in 0..<3 {
+      for child in level {
+        if attribute(child, kAXSubroleAttribute) as? String == kAXProcessSwitcherListSubrole {
+          switcher = child
+          break
+        }
+        if ProcessInfo.processInfo.systemUptime > deadline { return nil }
+      }
+      if switcher != nil { break }
+      var children: [AXUIElement] = []
+      for child in level {
+        if ProcessInfo.processInfo.systemUptime > deadline { return nil }
+        children += attribute(child, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        if children.count > 128 { return nil }
+      }
+      level = children
+      if ProcessInfo.processInfo.systemUptime > deadline { return nil }
     }
-    let background = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: 132))
-    background.material = .hudWindow
-    background.state = .active
-    background.wantsLayer = true
-    background.layer?.cornerRadius = 18
-    background.layer?.masksToBounds = true
-    let scroll = NSScrollView(frame: NSRect(x: 16, y: 40, width: width - 32, height: 80))
-    scroll.drawsBackground = false
-    let row = NSView(frame: NSRect(x: 0, y: 0, width: CGFloat(apps.count) * 84, height: 80))
-    for (index, app) in apps.enumerated() {
-      let cell = NSView(frame: NSRect(x: CGFloat(index) * 84, y: 0, width: 80, height: 80))
-      cell.wantsLayer = true
-      cell.layer?.cornerRadius = 12
-      if index == selection.index { cell.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.65).cgColor }
-      let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 60, height: 60))
-      icon.image = app.icon
-      icon.imageScaling = .scaleProportionallyUpOrDown
-      cell.addSubview(icon)
-      row.addSubview(cell)
+    guard let switcher,
+      let selected = (attribute(switcher, kAXSelectedChildrenAttribute) as? [AXUIElement])?.first,
+      let url = attribute(selected, kAXURLAttribute) as? URL else { return nil }
+    // Exact URL matching handles multiple running copies without guessing names.
+    let matches = NSWorkspace.shared.runningApplications.filter {
+      $0.bundleURL?.standardizedFileURL == url.standardizedFileURL && !$0.isTerminated
     }
-    scroll.documentView = row
-    row.scrollToVisible(NSRect(x: CGFloat(selection.index) * 84, y: 0, width: 80, height: 80))
-    background.addSubview(scroll)
-    let label = NSTextField(labelWithString: apps[selection.index].localizedName ?? "Application")
-    label.frame = NSRect(x: 16, y: 12, width: width - 32, height: 20)
-    label.alignment = .center
-    label.lineBreakMode = .byTruncatingTail
-    background.addSubview(label)
-    panel?.contentView = background
-    let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 900, height: 600)
-    panel?.setFrame(NSRect(x: frame.midX - width / 2, y: frame.midY - 66, width: width, height: 132), display: true)
-    panel?.orderFrontRegardless()
+    guard matches.count == 1, let app = matches.first else { return nil }
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(appElement, 0.1)
+    for name in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+      if let value = attribute(appElement, name), CFGetTypeID(value) == AXUIElementGetTypeID() {
+        var windowID: CGWindowID = 0
+        if axWindowID(value as! AXUIElement, &windowID) == .success, windowID != 0 { return (app, windowID) }
+      }
+    }
+    return nil
   }
 }

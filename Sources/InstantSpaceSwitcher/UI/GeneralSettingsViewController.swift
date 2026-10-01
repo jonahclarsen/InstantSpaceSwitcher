@@ -14,7 +14,7 @@ final class GeneralSettingsViewController: NSViewController {
   private let swipeOverrideCheckbox = NSButton(
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
   private let commandTabOverrideCheckbox = NSButton(
-    checkboxWithTitle: "Override Command-Tab switching (experimental)", target: nil, action: nil)
+    checkboxWithTitle: "Override native Command-Tab animation (experimental)", target: nil, action: nil)
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
   private let hideMenuBarIconCheckbox = NSButton(

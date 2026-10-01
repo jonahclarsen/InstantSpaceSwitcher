@@ -32,22 +32,27 @@ shortcuts in **System Settings → Keyboard → Keyboard Shortcuts → Mission C
 Otherwise the native shortcuts may retain the normal animation regardless of the
 app's speed setting. Re-enable them there if you stop using this app.
 
-**Command-Tab override (experimental)** is enabled by default in this local build.
-It replaces the macOS app chooser with an icon chooser: hold Command and press
-Tab to cycle through recently activated apps, use Shift-Tab to cycle backward,
-release Command to switch, or press Escape to cancel. The selected app's focused
-window (or main window) is mapped to its Space using private macOS APIs. The app
-drives the configured Space animation on that window's display before activating
-the destination app. No global Mission Control setting is changed. Disable it
-under **Settings → General** to restore native Command-Tab.
+**Native Command-Tab animation override (experimental)** is enabled by default
+in this local build. The macOS chooser retains its appearance, app ordering,
+Shift-Tab, arrow navigation, hiding, quitting, and Escape behavior. The app
+passes those inputs through and briefly holds the final Command-key release.
+It reads the native chooser's actual selected app from the Dock's Accessibility
+process switcher list, dismisses the chooser after the selection is committed,
+switches to that app's focused/main window's Space with the configured animation,
+then activates the selected app and forwards the original release. Typing during
+the slide is queued and replayed afterward. Same-Space selections pass through
+to macOS immediately.
+No global Mission Control setting is changed. Disable the override under
+**Settings → General** to restore the native animation as well.
 
-Apps without an accessible window, unavailable private APIs, or a transition
-that cannot complete within two seconds fall back to normal macOS activation
-and may retain the native animation. The initial ordering of apps that have not
-been activated since launch is alphabetical; subsequent ordering follows recent
-activation. This chooser supports Tab, Shift-Tab, and Escape; other native
-chooser actions (such as hiding or quitting the selected app) are not implemented.
-Other keys are ignored while the chooser is open.
+If the native selection or its window cannot be read (including a very quick
+Command-Tab before the chooser exposes its selection), the original release is
+forwarded and macOS handles the transition. Quick taps allow up to 120 ms for
+the native selection to appear; slow Accessibility queries may add latency.
+Mouse selection and
+Return-to-select and Option-on-release also proceed natively and may retain the
+native animation.
+A two-second timeout releases the chooser if a transition cannot complete.
 Fullscreen and multiple-display switching need visual verification on each macOS
 version, as with the existing gesture driver.
 
