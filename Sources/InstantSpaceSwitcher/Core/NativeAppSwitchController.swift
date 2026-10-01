@@ -11,7 +11,6 @@ private func windowID(_ element: AXUIElement, _ result: UnsafeMutablePointer<CGW
 final class NativeAppSwitchController {
   private let windowQueue = DispatchQueue(label: "app-switch-window", qos: .userInteractive)
   private var activationObserver: Any?
-  private var dockObserver: Any?
   private var settingsObserver: Any?
   private static weak var inputObserver: NativeAppSwitchController?
   private var permissionTimer: Timer?
@@ -24,10 +23,38 @@ final class NativeAppSwitchController {
   private var spaceNavigationUntil = 0.0
   private var enabled = false
 
-  static func savedSwitchOnActivate() -> Bool {
+  // Dock owns the complete WindowServer workspace dictionary and replaces it
+  // wholesale. A partial session dictionary drops Dock's other keys and breaks
+  // the Mission Control layout, so change the native setting and let Dock
+  // rebuild the dictionary. The original value is kept until it is restored.
+  nonisolated private static let switchOnActivateKey = "AppleSpacesSwitchOnActivate" as CFString
+  nonisolated private static let restoreKey = "appSwitchRestoreSwitchOnActivate"
+
+  nonisolated private static func savedSwitchOnActivate() -> Bool? {
     _ = CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    return CFPreferencesCopyValue("AppleSpacesSwitchOnActivate" as CFString,
-      kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool ?? true
+    return CFPreferencesCopyValue(switchOnActivateKey,
+      kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool
+  }
+
+  nonisolated private static func setSwitchOnActivate(_ value: Bool?) {
+    CFPreferencesSetValue(switchOnActivateKey, value as CFPropertyList?,
+      kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    _ = CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    // Same notification System Settings posts; Dock rereads and resends.
+    DistributedNotificationCenter.default().postNotificationName(
+      Notification.Name("com.apple.AppleSpacesSwitchOnActivate"), object: nil, userInfo: nil,
+      deliverImmediately: true)
+  }
+
+  /// Restores the user's setting after a quit, crash, or interrupted session.
+  @discardableResult
+  nonisolated static func restoreSavedPreference() -> Bool {
+    let defaults = UserDefaults.standard
+    guard let original = defaults.string(forKey: restoreKey) else { return false }
+    setSwitchOnActivate(original == "unset" ? nil : original == "true")
+    defaults.removeObject(forKey: restoreKey)
+    defaults.synchronize()
+    return true
   }
 
   func setEnabled(_ enabled: Bool) {
@@ -40,16 +67,10 @@ final class NativeAppSwitchController {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         MainActor.assumeIsolated { self?.activated(app) }
       }
-    dockObserver = center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
-      object: nil, queue: .main) { [weak self] notification in
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-          app.bundleIdentifier == "com.apple.dock" else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.applySessionOverride() }
-      }
     settingsObserver = DistributedNotificationCenter.default().addObserver(
       forName: Notification.Name("com.apple.AppleSpacesSwitchOnActivate"), object: nil, queue: .main
     ) { [weak self] _ in
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self?.applySessionOverride() }
+      MainActor.assumeIsolated { self?.savedSettingChanged() }
     }
     // Observation only: distinguishes a fresh user selection from activation
     // notifications produced by the slide itself, including rapid Command-Tab.
@@ -77,12 +98,10 @@ final class NativeAppSwitchController {
     permissionTimer = nil
     let center = NSWorkspace.shared.notificationCenter
     if let activationObserver { center.removeObserver(activationObserver) }
-    if let dockObserver { center.removeObserver(dockObserver) }
     if let settingsObserver { DistributedNotificationCenter.default().removeObserver(settingsObserver) }
     iss_set_user_input_callback(nil)
     Self.inputObserver = nil
     activationObserver = nil
-    dockObserver = nil
     settingsObserver = nil
     restoreSessionPreference()
   }
@@ -101,14 +120,22 @@ final class NativeAppSwitchController {
   }
 
   private func restoreSessionPreference() {
-    guard ownsSessionPreference else { return }
-    _ = iss_set_app_activation_space_switching(Self.savedSwitchOnActivate())
+    // Also restores a value left behind by a previous run.
+    Self.restoreSavedPreference()
     ownsSessionPreference = false
     if let watchdog, watchdog.isRunning {
       watchdog.terminate()
       watchdog.waitUntilExit()
     }
     watchdog = nil
+  }
+
+  private func savedSettingChanged() {
+    // Our own write reads back as false. True means the user turned the
+    // native setting on in System Settings while the override was active.
+    guard ownsSessionPreference, Self.savedSwitchOnActivate() != false else { return }
+    UserDefaults.standard.set("true", forKey: Self.restoreKey)
+    Self.setSwitchOnActivate(false)
   }
 
   private func applySessionOverride() {
@@ -121,16 +148,18 @@ final class NativeAppSwitchController {
       do { try process.run() } catch { return }
       watchdog = process
     }
-    guard iss_set_app_activation_space_switching(false) else {
-      watchdog?.terminate()
-      watchdog = nil
-      return
+    let defaults = UserDefaults.standard
+    if defaults.string(forKey: Self.restoreKey) == nil {
+      let original = Self.savedSwitchOnActivate()
+      defaults.set(original.map { $0 ? "true" : "false" } ?? "unset", forKey: Self.restoreKey)
+      defaults.synchronize()
     }
+    Self.setSwitchOnActivate(false)
     ownsSessionPreference = true
     if ProcessInfo.processInfo.environment["ISS_APP_SWITCH_DIAGNOSTICS"] == "1" {
-      print("Native app-switch override active; Accessibility trusted; saved preferences unchanged")
+      print("Native app-switch override active; Accessibility trusted; native Space jump off until restore")
     }
-    // WindowServer applies this asynchronously; no user input waits here.
+    // Dock applies this asynchronously; no user input waits here.
     readyAt = ProcessInfo.processInfo.systemUptime + 0.5
   }
 

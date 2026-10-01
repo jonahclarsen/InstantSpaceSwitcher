@@ -77,9 +77,6 @@ bool iss_switch_to_window(unsigned int windowID);
 bool iss_window_is_on_active_space(unsigned int windowID);
 bool iss_has_pending_switch(void);
 
-/** Runtime session preference only; does not change saved system settings. */
-bool iss_set_app_activation_space_switching(bool enabled);
-
 typedef enum {
     ISSUserInputCommandTab,
     ISSUserInputMouseClick,

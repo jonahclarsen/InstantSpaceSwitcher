@@ -53,11 +53,15 @@ Physical Space swipes and Control-arrow navigation suppress activation following
 while the desktop settles, so the new focus cannot undo a manual Space change.
 An explicit Command-Tab selection or mouse click clears that suppression.
 
-While enabled and Accessibility is granted, the app temporarily disables the
-native app-activation Space jump through a WindowServer session preference.
-Saved macOS preferences are unchanged, and Dock is not restarted. Disabling the
-option or quitting restores the saved native behavior; a separate helper also
-restores it if the app crashes. This uses private macOS APIs and has been tested
+While enabled and Accessibility is granted, the app temporarily turns off
+**System Settings → Desktop & Dock → When switching to an application, switch to
+a Space with open windows** so the native jump does not race the slide. Dock
+rebuilds its own WindowServer workspace preferences from that setting; Dock is
+not restarted. The original value is recorded and restored when the option is
+disabled or the app quits; a separate helper restores it if the app crashes, and
+the next launch restores anything still left over. An earlier build set a
+partial WindowServer session preference instead, which discarded Dock's other
+workspace keys and broke the Mission Control window layout. This has been tested
 on macOS 26.6.2. The earlier approach that held and replayed Command release was
 removed because it caused sticky or unresponsive keyboard input.
 

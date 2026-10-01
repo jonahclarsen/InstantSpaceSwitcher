@@ -62,7 +62,6 @@ extern CGSConnectionID CGSMainConnectionID(void) __attribute__((weak_import));
 extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection) __attribute__((weak_import));
 
 extern CFArrayRef CGSCopySpacesForWindows(CGSConnectionID connection, int mask, CFArrayRef windows) __attribute__((weak_import));
-extern CGError CGSSessionSetCurrentSessionWorkspacePreferences(CGSConnectionID connection, CFDictionaryRef preferences) __attribute__((weak_import));
 
 static CGPoint gestureLocation;
 static bool hasGestureLocation = false;
@@ -1078,19 +1077,6 @@ bool iss_switch_to_window(unsigned int windowID) {
         if (switchCallback) switchCallback(target);
     }
     return success;
-}
-
-bool iss_set_app_activation_space_switching(bool enabled) {
-    if (!CGSMainConnectionID || !CGSSessionSetCurrentSessionWorkspacePreferences) return false;
-    CGSConnectionID connection = CGSMainConnectionID();
-    if (!connection) return false;
-    const void *key = CFSTR("WorkspaceSwitchOnAppActivation");
-    const void *value = enabled ? kCFBooleanTrue : kCFBooleanFalse;
-    CFDictionaryRef preferences = CFDictionaryCreate(NULL, &key, &value, 1,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CGError result = CGSSessionSetCurrentSessionWorkspacePreferences(connection, preferences);
-    CFRelease(preferences);
-    return result == kCGErrorSuccess;
 }
 
 void iss_set_swipe_override(bool enabled) {
