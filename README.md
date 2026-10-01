@@ -7,9 +7,9 @@ Native instant workspace switching on macOS. No more waiting for animations.
 > that I'm putting in an effort to actively maintain. On top of upstream, it adds a
 > customizable Space transition speed curve, applies those animation settings to
 > Space switches triggered by Command-Tab and the Dock, and merges community pull
-> requests from upstream, including macOS 27 support (#88/#100), rapid-switch
-> overshoot protection (#101), a fix for blank windows after switching (#105),
-> wrap-around switching (#33), and exact modifier/AltGr hotkey matching (#83).
+> requests from upstream, including macOS 27 support ([#88](https://github.com/jurplel/InstantSpaceSwitcher/pull/88)/[#100](https://github.com/jurplel/InstantSpaceSwitcher/pull/100)), rapid-switch
+> overshoot protection ([#101](https://github.com/jurplel/InstantSpaceSwitcher/pull/101)), a fix for blank windows after switching ([#105](https://github.com/jurplel/InstantSpaceSwitcher/pull/105)),
+> wrap-around switching ([#33](https://github.com/jurplel/InstantSpaceSwitcher/pull/33)), and exact modifier/AltGr hotkey matching ([#83](https://github.com/jurplel/InstantSpaceSwitcher/pull/83)).
 > Issues and PRs are welcome here.
 
 This local build defaults to **Fast**, to keep a visible sliding transition.
