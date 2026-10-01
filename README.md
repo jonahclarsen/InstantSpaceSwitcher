@@ -32,6 +32,25 @@ shortcuts in **System Settings → Keyboard → Keyboard Shortcuts → Mission C
 Otherwise the native shortcuts may retain the normal animation regardless of the
 app's speed setting. Re-enable them there if you stop using this app.
 
+**Command-Tab override (experimental)** is enabled by default in this local build.
+It replaces the macOS app chooser with an icon chooser: hold Command and press
+Tab to cycle through recently activated apps, use Shift-Tab to cycle backward,
+release Command to switch, or press Escape to cancel. The selected app's focused
+window (or main window) is mapped to its Space using private macOS APIs. The app
+drives the configured Space animation on that window's display before activating
+the destination app. No global Mission Control setting is changed. Disable it
+under **Settings → General** to restore native Command-Tab.
+
+Apps without an accessible window, unavailable private APIs, or a transition
+that cannot complete within two seconds fall back to normal macOS activation
+and may retain the native animation. The initial ordering of apps that have not
+been activated since launch is alphabetical; subsequent ordering follows recent
+activation. This chooser supports Tab, Shift-Tab, and Escape; other native
+chooser actions (such as hiding or quitting the selected app) are not implemented.
+Other keys are ignored while the chooser is open.
+Fullscreen and multiple-display switching need visual verification on each macOS
+version, as with the existing gesture driver.
+
 https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
 ## Features

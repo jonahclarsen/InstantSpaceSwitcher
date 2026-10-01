@@ -72,6 +72,16 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction);
  */
 bool iss_switch_to_index(unsigned int targetIndex);
 
+/** @brief Switch to a window's Space on its own display. Returns false if the
+ * private window-to-Space query is unavailable. Call on the main thread. */
+bool iss_switch_to_window(unsigned int windowID);
+
+/** @brief Query whether a window is on an active Space, without predictions. */
+bool iss_window_is_on_active_space(unsigned int windowID);
+
+/** @brief True while the synthetic gesture is still being driven. */
+bool iss_has_pending_switch(void);
+
 /**
  * @brief Enables or disables interception of trackpad horizontal swipe gestures.
  *

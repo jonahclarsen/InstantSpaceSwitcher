@@ -30,6 +30,10 @@ let package = Package(
         .testTarget(
             name: "ISSTests",
             dependencies: ["ISS"]
+        ),
+        .testTarget(
+            name: "CommandTabTests",
+            dependencies: ["InstantSpaceSwitcher"]
         )
     ]
 )

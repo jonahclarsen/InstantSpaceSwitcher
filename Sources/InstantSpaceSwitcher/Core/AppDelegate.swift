@@ -62,10 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     bindHotkeys()
     observeSpaceChanges()
     observeAppActivation()
+    CommandTabSwitcher.shared.start()
     refreshSpaceInfo()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    CommandTabSwitcher.shared.stop()
     iss_destroy()
     stopObservingSpaceChanges()
     stopObservingAppActivation()
