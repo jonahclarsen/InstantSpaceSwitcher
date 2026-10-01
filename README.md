@@ -32,29 +32,11 @@ shortcuts in **System Settings → Keyboard → Keyboard Shortcuts → Mission C
 Otherwise the native shortcuts may retain the normal animation regardless of the
 app's speed setting. Re-enable them there if you stop using this app.
 
-**Native Command-Tab animation override (experimental)** is enabled by default
-in this local build. The macOS chooser retains its appearance, app ordering,
-Shift-Tab, arrow navigation, hiding, quitting, and Escape behavior. The app
-passes those inputs through and briefly holds the final Command-key release.
-It reads the native chooser's actual selected app from the Dock's Accessibility
-process switcher list, dismisses the chooser after the selection is committed,
-switches to that app's focused/main window's Space with the configured animation,
-then activates the selected app and forwards the original release. Typing during
-the slide is queued and replayed afterward. Same-Space selections pass through
-to macOS immediately.
-No global Mission Control setting is changed. Disable the override under
-**Settings → General** to restore the native animation as well.
-
-If the native selection or its window cannot be read (including a very quick
-Command-Tab before the chooser exposes its selection), the original release is
-forwarded and macOS handles the transition. Quick taps allow up to 120 ms for
-the native selection to appear; slow Accessibility queries may add latency.
-Mouse selection and
-Return-to-select and Option-on-release also proceed natively and may retain the
-native animation.
-A two-second timeout releases the chooser if a transition cannot complete.
-Fullscreen and multiple-display switching need visual verification on each macOS
-version, as with the existing gesture driver.
+Command-Tab retains the native macOS chooser and Space transition animation.
+The app's animation settings apply to its Space shortcuts, CLI, and optional
+trackpad swipe override. An experimental Command-Tab override was removed:
+holding and replaying the Command-key release introduced sticky or unresponsive
+keyboard input and did not reliably accelerate the native transition.
 
 https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 

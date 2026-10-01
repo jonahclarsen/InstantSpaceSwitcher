@@ -3,7 +3,6 @@ import Carbon
 
 final class ShortcutRecorderControl: NSView {
   private static weak var activeRecorder: ShortcutRecorderControl?
-  static var isAnyRecording: Bool { activeRecorder?.isRecording == true }
 
   static func cancelActiveRecording() {
     activeRecorder?.isRecording = false
