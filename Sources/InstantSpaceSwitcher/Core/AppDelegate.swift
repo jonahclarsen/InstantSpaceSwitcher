@@ -291,6 +291,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitch(_ direction: ISSDirection) {
+    if UserDefaults.standard.bool(forKey: "wrapAroundSpaces") {
+      var info = ISSSpaceInfo()
+      if iss_get_space_info(&info), info.spaceCount > 1, !iss_can_move(info, direction) {
+        performSpaceSwitchToIndex(direction == ISSDirectionLeft ? info.spaceCount - 1 : 0)
+        return
+      }
+    }
+
     if !iss_switch(direction) {
       NSSound.beep()
       return

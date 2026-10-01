@@ -13,6 +13,8 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Show on-screen display in Mission Control", target: nil, action: nil)
   private let swipeOverrideCheckbox = NSButton(
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
+  private let wrapAroundCheckbox = NSButton(
+    checkboxWithTitle: "Wrap around when switching past the first or last space", target: nil, action: nil)
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
   private let appSwitchOverrideCheckbox = NSButton(
@@ -53,6 +55,8 @@ final class GeneralSettingsViewController: NSViewController {
     swipeOverrideCheckbox.action = #selector(swipeOverrideChanged)
     appSwitchOverrideCheckbox.target = self
     appSwitchOverrideCheckbox.action = #selector(appSwitchOverrideChanged)
+    wrapAroundCheckbox.target = self
+    wrapAroundCheckbox.action = #selector(wrapAroundChanged)
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
     hideMenuBarIconCheckbox.target = self
@@ -67,6 +71,7 @@ final class GeneralSettingsViewController: NSViewController {
     formView.addRow(label: nil, control: hideMenuBarIconCheckbox)
     formView.addRow(label: nil, control: swipeOverrideCheckbox)
     formView.addRow(label: nil, control: appSwitchOverrideCheckbox)
+    formView.addRow(label: nil, control: wrapAroundCheckbox)
     appSwitchOverrideCheckbox.toolTip = "Keeps the native Command-Tab chooser. Also applies when activating an app from the Dock."
 
     let experimentalTitle = NSMutableAttributedString(string: "Enable Mission Control/Exposé detection\n")
@@ -119,6 +124,8 @@ final class GeneralSettingsViewController: NSViewController {
     swipeOverrideCheckbox.state = defaults.bool(forKey: "swipeOverride") ? .on : .off
     appSwitchOverrideCheckbox.state = (defaults.object(forKey: "appSwitchOverride") as? Bool ?? true) ? .on : .off
 
+    wrapAroundCheckbox.state = defaults.bool(forKey: "wrapAroundSpaces") ? .on : .off
+
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
 
@@ -140,6 +147,10 @@ final class GeneralSettingsViewController: NSViewController {
 
   @objc private func showOSDInMissionControlChanged(_ sender: NSButton) {
     defaults.set(sender.state == .on, forKey: "showOSDInMissionControl")
+  }
+
+  @objc private func wrapAroundChanged(_ sender: NSButton) {
+    defaults.set(sender.state == .on, forKey: "wrapAroundSpaces")
   }
 
   @objc private func osdDurationChanged(_ sender: NSPopUpButton) {
