@@ -1,4 +1,5 @@
 #include "include/ISS.h"
+#include "event_serialize.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -7,6 +8,7 @@
 #include <dlfcn.h>
 #include <float.h>
 #include <math.h>
+#include <mach/mach_time.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,9 +19,13 @@ static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
 static const CGEventField kCGEventGestureSwipeMotion = (CGEventField)123;
 static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
+static const CGEventField kCGEventGestureSwipePositionX = (CGEventField)125;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
+static const CGEventField kCGEventGesturePhaseAlias = (CGEventField)134;
+static const CGEventField kCGEventGestureZoomDeltaY = (CGEventField)138;
+static const CGEventField kCGEventSourceUnixProcessIDAlias = (CGEventField)169;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -614,6 +620,77 @@ bool iss_start_switch_animation(ISSDirection direction, double speed, void (*pos
     return true;
 }
 
+// On macOS 27 the Dock applies the "Natural scrolling" trackpad preference to
+// synthetic horizontal swipes: with it enabled, progress and velocity must be
+// negated relative to the legacy convention; with it disabled, the legacy sign
+// applies. Physical swipes read by the event tap are unaffected.
+static bool iss_natural_scrolling_enabled(void) {
+    // Synchronize so a change made in System Settings is seen immediately.
+    CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+    Boolean valid = false;
+    Boolean enabled = CFPreferencesGetAppBooleanValue(
+        CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication, &valid);
+    // Unset means the system default, which is natural scrolling.
+    return valid ? enabled : true;
+}
+
+// macOS 27 only honors DockControl events carrying a serialized IOHID payload.
+// The animated path above has not been verified there, so these switches stay
+// instant.
+static bool iss_post_augmented_dock_swipe(CGSGesturePhase phase, ISSDirection direction,
+                                          double velocity, bool invert) {
+    const double sign = ((direction == ISSDirectionRight) ? 1.0 : -1.0) * (invert ? -1.0 : 1.0);
+    const double progress = sign * 0.000016;
+    const double vel = sign * velocity;
+
+    CGEventRef ev = CGEventCreate(NULL);
+    if (!ev) {
+        return false;
+    }
+    if (hasGestureLocation) CGEventSetLocation(ev, gestureLocation);
+    CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
+    CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+    CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
+    CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
+    CGEventSetIntegerValueField(ev, kCGEventGesturePhaseAlias, phase);
+    CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaY, 3.0);
+    CGEventSetDoubleValueField(ev, kCGEventSourceUnixProcessIDAlias,
+                                (double)mach_absolute_time());
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipePositionX, 0.1);
+
+    // Match FasterSwiper: only the Ended event carries velocity.
+    if (phase == kCGSGesturePhaseEnded) {
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
+    }
+
+    CGEventRef augmented = iss_augment_dock_swipe_event(ev);
+    CFRelease(ev);
+    if (!augmented) {
+        return false;
+    }
+    CGEventPost(kCGSessionEventTap, augmented);
+    CFRelease(augmented);
+    return true;
+}
+
+static bool iss_perform_augmented_switch_gesture(ISSDirection direction, double velocity) {
+    // The Dock drops augmented phases posted back-to-back, so space them a
+    // few ms apart. Mission Control still needs all three phases.
+    const useconds_t phaseDelay = 10000;
+    const bool invert = iss_natural_scrolling_enabled();
+
+    if (!iss_post_augmented_dock_swipe(kCGSGesturePhaseBegan, direction, velocity, invert)) {
+        return false;
+    }
+    usleep(phaseDelay);
+    if (!iss_post_augmented_dock_swipe(kCGSGesturePhaseChanged, direction, velocity, invert)) {
+        return false;
+    }
+    usleep(phaseDelay);
+    return iss_post_augmented_dock_swipe(kCGSGesturePhaseEnded, direction, velocity, invert);
+}
+
 void iss_wait_for_pending_switch(void) {
     while (animation.event) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
@@ -625,6 +702,9 @@ static void iss_post_gesture_event(CGEventRef event) {
 }
 
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
+    if (iss_requires_event_augmentation()) {
+        return iss_perform_augmented_switch_gesture(direction, velocity);
+    }
     return iss_start_switch_animation(direction, velocity, iss_post_gesture_event);
 }
 

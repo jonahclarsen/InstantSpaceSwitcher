@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
 
 static void print_usage(const char *progName) {
@@ -59,6 +60,11 @@ int main(int argc, char **argv) {
     }
 
     iss_wait_for_pending_switch();
+    // iss_init() installs a session event tap whose runloop source must be
+    // serviced before the posted dock-swipe events reach the Dock. Pump the
+    // runloop briefly so the switch actually happens before we exit.
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.3, false);
+
     iss_destroy();
     return 0;
 }
