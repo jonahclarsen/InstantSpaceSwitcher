@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
+  private let nativeAppSwitchController = NativeAppSwitchController()
 
   func applicationWillFinishLaunching(_ notification: Notification) {
     NSAppleEventManager.shared().setEventHandler(
@@ -62,13 +63,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     bindHotkeys()
     observeSpaceChanges()
     observeAppActivation()
+    setAppSwitchOverrideEnabled(UserDefaults.standard.object(forKey: "appSwitchOverride") as? Bool ?? true)
     refreshSpaceInfo()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    nativeAppSwitchController.stop()
     iss_destroy()
     stopObservingSpaceChanges()
     stopObservingAppActivation()
+  }
+
+  func setAppSwitchOverrideEnabled(_ enabled: Bool) {
+    nativeAppSwitchController.setEnabled(enabled)
   }
 
   private func retryIssInit() {

@@ -55,6 +55,12 @@ extern CFStringRef CGSCopyActiveMenuBarDisplayIdentifier(CGSConnectionID connect
 extern CGSConnectionID CGSMainConnectionID(void) __attribute__((weak_import));
 extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection) __attribute__((weak_import));
 
+extern CFArrayRef CGSCopySpacesForWindows(CGSConnectionID connection, int mask, CFArrayRef windows) __attribute__((weak_import));
+extern CGError CGSSessionSetCurrentSessionWorkspacePreferences(CGSConnectionID connection, CFDictionaryRef preferences) __attribute__((weak_import));
+
+static CGPoint gestureLocation;
+static bool hasGestureLocation = false;
+
 static CFMachPortRef globalTap = NULL;
 static CFRunLoopSourceRef globalSource = NULL;
 
@@ -73,6 +79,33 @@ static double animationEaseIn = 0.1;
 static double animationEaseOut = 0.1;
 
 static ISSSwitchCallback switchCallback = NULL;
+static ISSUserInputCallback userInputCallback = NULL;
+
+void iss_set_user_input_callback(ISSUserInputCallback callback) {
+    userInputCallback = callback;
+}
+
+// Shared with regression tests. Only observes; never edits or consumes events.
+void iss_observe_user_input(CGEventType type, CGEventRef event) {
+    if (!userInputCallback || !event) return;
+    // Our synthetic swipe must not look like a physical Space navigation.
+    if (CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID) != 0) return;
+    if (type == kCGEventKeyDown) {
+        int64_t key = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        CGEventFlags flags = CGEventGetFlags(event);
+        if (key == 48 && (flags & kCGEventFlagMaskCommand)) {
+            userInputCallback(ISSUserInputCommandTab);
+        } else if ((key == 123 || key == 124) && (flags & kCGEventFlagMaskControl)) {
+            userInputCallback(ISSUserInputSpaceNavigation);
+        }
+    } else if (type == kCGEventLeftMouseDown) {
+        userInputCallback(ISSUserInputMouseClick);
+    } else if (CGEventGetIntegerValueField(event, kCGSEventTypeField) == kCGSEventDockControl &&
+               CGEventGetIntegerValueField(event, kCGEventGestureHIDType) == kIOHIDEventTypeDockSwipe &&
+               CGEventGetIntegerValueField(event, kCGEventGestureSwipeMotion) == kCGGestureMotionHorizontal) {
+        userInputCallback(ISSUserInputSpaceNavigation);
+    }
+}
 
 // Predictions dictionary: DisplayID (CFStringRef) -> Index (CFNumberRef)
 static CFMutableDictionaryRef predictionsDict = NULL;
@@ -140,6 +173,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
         return event;
     }
 
+    iss_observe_user_input(type, event);
     if (!swipeOverrideEnabled) return event;
 
     CGSEventType eventType =
@@ -450,6 +484,7 @@ static CGEventRef iss_create_dock_swipe(ISSDirection direction) {
     const bool isRight = (direction == ISSDirectionRight);
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) return NULL;
+    if (hasGestureLocation) CGEventSetLocation(ev, gestureLocation);
     CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
@@ -681,6 +716,7 @@ bool iss_init(void) {
     }
 
     CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp)
+        | CGEventMaskBit(kCGEventLeftMouseDown)
         | (1ULL << kCGSEventGesture) | (1ULL << kCGSEventDockControl);
     globalTap = CGEventTapCreate(
         kCGSessionEventTap,
@@ -807,6 +843,129 @@ bool iss_switch_to_index(unsigned int targetIndex) {
     set_prediction(info.displayID, targetIndex);
     if (switchCallback) { switchCallback(targetIndex); }
     return !outOfBounds;
+}
+
+bool iss_has_pending_switch(void) {
+    return animation.event != NULL;
+}
+
+// Internal entry point shared with fixture tests; no live WindowServer calls.
+bool iss_resolve_window_space(CFArrayRef displays, CFArrayRef memberships,
+                              ISSSpaceInfo *info, unsigned int *targetIndex) {
+    if (!displays || !memberships || !info || !targetIndex) return false;
+    bool found = false;
+    for (CFIndex d = 0; d < CFArrayGetCount(displays); d++) {
+        CFDictionaryRef display = CFArrayGetValueAtIndex(displays, d);
+        if (CFGetTypeID(display) != CFDictionaryGetTypeID()) continue;
+        CFDictionaryRef current = CFDictionaryGetValue(display, CFSTR("Current Space"));
+        if (!current || CFGetTypeID(current) != CFDictionaryGetTypeID()) continue;
+        CFNumberRef activeID = CFDictionaryGetValue(current, CFSTR("id64"));
+        CGSSpaceID active = 0;
+        if (!activeID || CFGetTypeID(activeID) != CFNumberGetTypeID() ||
+            !CFNumberGetValue(activeID, kCFNumberSInt64Type, &active) || !active) continue;
+        ISSSpaceInfo candidate;
+        if (!extract_space_info_from_display(display, active, true, &candidate)) continue;
+        CFArrayRef spaces = CFDictionaryGetValue(display, CFSTR("Spaces"));
+        unsigned int index = 0;
+        for (CFIndex s = 0; s < CFArrayGetCount(spaces); s++) {
+            CFDictionaryRef space = CFArrayGetValueAtIndex(spaces, s);
+            if (CFGetTypeID(space) != CFDictionaryGetTypeID()) continue;
+            CFNumberRef sid = CFDictionaryGetValue(space, CFSTR("id64"));
+            if (!sid || CFGetTypeID(sid) != CFNumberGetTypeID()) continue;
+            if (CFArrayContainsValue(memberships, CFRangeMake(0, CFArrayGetCount(memberships)), sid)) {
+                if (!found || index == candidate.currentIndex) {
+                    *info = candidate;
+                    *targetIndex = index;
+                    found = true;
+                }
+                if (index == candidate.currentIndex) goto done;
+            }
+            index++;
+        }
+    }
+done:
+    return found;
+}
+
+// Prefer an already visible membership (including windows on all desktops).
+// Otherwise find the window's display and zero-based destination index.
+static bool window_space_info(unsigned int windowID, ISSSpaceInfo *info,
+                              unsigned int *targetIndex) {
+    if (!windowID || !cgs_symbols_available() || !CGSCopySpacesForWindows) return false;
+    CGSConnectionID connection = CGSMainConnectionID();
+    if (!connection) return false;
+    CFNumberRef number = CFNumberCreate(NULL, kCFNumberIntType, &windowID);
+    CFArrayRef windows = CFArrayCreate(NULL, (const void **)&number, 1, &kCFTypeArrayCallBacks);
+    CFArrayRef memberships = CGSCopySpacesForWindows(connection, 7, windows);
+    CFRelease(windows);
+    CFRelease(number);
+    if (!memberships) return false;
+    CFArrayRef displays = CGSCopyManagedDisplaySpaces(connection, NULL);
+    if (!displays) { CFRelease(memberships); return false; }
+    bool found = iss_resolve_window_space(displays, memberships, info, targetIndex);
+    CFRelease(displays);
+    CFRelease(memberships);
+    return found;
+}
+
+bool iss_window_is_on_active_space(unsigned int windowID) {
+    ISSSpaceInfo info;
+    unsigned int target;
+    return window_space_info(windowID, &info, &target) && info.currentIndex == target;
+}
+
+bool iss_switch_to_window(unsigned int windowID) {
+    ISSSpaceInfo info;
+    unsigned int target;
+    if (!window_space_info(windowID, &info, &target)) return false;
+    unsigned int predicted;
+    unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
+    if (target == current) return true;
+    iss_finish_animation(true);
+
+    CFStringRef identifier = CFStringCreateWithCString(NULL, info.displayID, kCFStringEncodingUTF8);
+    CGDirectDisplayID display = CGMainDisplayID();
+    if (!CFEqual(identifier, CFSTR("Main"))) {
+        CFUUIDRef uuid = CFUUIDCreateFromString(NULL, identifier);
+        CFRelease(identifier);
+        if (!uuid) return false;
+        display = CGDisplayGetDisplayIDFromUUID(uuid);
+        CFRelease(uuid);
+    } else {
+        CFRelease(identifier);
+    }
+    if (!display || !CGDisplayIsActive(display)) return false;
+    CGRect bounds = CGDisplayBounds(display);
+    gestureLocation = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
+    hasGestureLocation = true;
+    ISSDirection direction = target > current ? ISSDirectionRight : ISSDirectionLeft;
+    unsigned int steps = target > current ? target - current : current - target;
+    bool success = true;
+    for (unsigned int step = 0; step < steps; step++) {
+        if (!iss_perform_switch_gesture(direction, gestureSpeed * steps)) {
+            success = false;
+            break;
+        }
+    }
+    hasGestureLocation = false;
+    if (success) {
+        set_prediction(info.displayID, target);
+        if (switchCallback) switchCallback(target);
+    }
+    return success;
+}
+
+bool iss_set_app_activation_space_switching(bool enabled) {
+    if (!CGSMainConnectionID || !CGSSessionSetCurrentSessionWorkspacePreferences) return false;
+    CGSConnectionID connection = CGSMainConnectionID();
+    if (!connection) return false;
+    const void *key = CFSTR("WorkspaceSwitchOnAppActivation");
+    const void *value = enabled ? kCFBooleanTrue : kCFBooleanFalse;
+    CFDictionaryRef preferences = CFDictionaryCreate(NULL, &key, &value, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CGError result = CGSSessionSetCurrentSessionWorkspacePreferences(connection, preferences);
+    CFRelease(preferences);
+    return result == kCGErrorSuccess;
 }
 
 void iss_set_swipe_override(bool enabled) {

@@ -72,6 +72,23 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction);
  */
 bool iss_switch_to_index(unsigned int targetIndex);
 
+/** Switch to the Space containing a window, using that window's display. */
+bool iss_switch_to_window(unsigned int windowID);
+bool iss_window_is_on_active_space(unsigned int windowID);
+bool iss_has_pending_switch(void);
+
+/** Runtime session preference only; does not change saved system settings. */
+bool iss_set_app_activation_space_switching(bool enabled);
+
+typedef enum {
+    ISSUserInputCommandTab,
+    ISSUserInputMouseClick,
+    ISSUserInputSpaceNavigation
+} ISSUserInput;
+/** Observe input on the main run loop without consuming or changing it. */
+typedef void (*ISSUserInputCallback)(ISSUserInput input);
+void iss_set_user_input_callback(ISSUserInputCallback callback);
+
 /**
  * @brief Enables or disables interception of trackpad horizontal swipe gestures.
  *

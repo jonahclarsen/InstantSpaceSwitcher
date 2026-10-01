@@ -15,6 +15,8 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
+  private let appSwitchOverrideCheckbox = NSButton(
+    checkboxWithTitle: "Use animation settings when switching apps", target: nil, action: nil)
   private let hideMenuBarIconCheckbox = NSButton(
     checkboxWithTitle: "Hide menu bar icon", target: nil, action: nil)
 
@@ -49,6 +51,8 @@ final class GeneralSettingsViewController: NSViewController {
     showOSDInMissionControlCheckbox.action = #selector(showOSDInMissionControlChanged)
     swipeOverrideCheckbox.target = self
     swipeOverrideCheckbox.action = #selector(swipeOverrideChanged)
+    appSwitchOverrideCheckbox.target = self
+    appSwitchOverrideCheckbox.action = #selector(appSwitchOverrideChanged)
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
     hideMenuBarIconCheckbox.target = self
@@ -62,6 +66,8 @@ final class GeneralSettingsViewController: NSViewController {
     formView.addRow(label: systemLabel, control: launchAtLoginCheckbox)
     formView.addRow(label: nil, control: hideMenuBarIconCheckbox)
     formView.addRow(label: nil, control: swipeOverrideCheckbox)
+    formView.addRow(label: nil, control: appSwitchOverrideCheckbox)
+    appSwitchOverrideCheckbox.toolTip = "Keeps the native Command-Tab chooser. Also applies when activating an app from the Dock."
 
     let experimentalTitle = NSMutableAttributedString(string: "Enable Mission Control/Exposé detection\n")
     let sublabel = NSAttributedString(
@@ -111,6 +117,7 @@ final class GeneralSettingsViewController: NSViewController {
 
     hideMenuBarIconCheckbox.state = defaults.bool(forKey: "hideMenuBarIcon") ? .on : .off
     swipeOverrideCheckbox.state = defaults.bool(forKey: "swipeOverride") ? .on : .off
+    appSwitchOverrideCheckbox.state = (defaults.object(forKey: "appSwitchOverride") as? Bool ?? true) ? .on : .off
 
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
@@ -146,6 +153,12 @@ final class GeneralSettingsViewController: NSViewController {
     let isEnabled = sender.state == .on
     defaults.set(isEnabled, forKey: "swipeOverride")
     iss_set_swipe_override(isEnabled)
+  }
+
+  @objc private func appSwitchOverrideChanged(_ sender: NSButton) {
+    let enabled = sender.state == .on
+    defaults.set(enabled, forKey: "appSwitchOverride")
+    (NSApp.delegate as? AppDelegate)?.setAppSwitchOverrideEnabled(enabled)
   }
 
   @objc private func hideMenuBarIconChanged(_ sender: NSButton) {

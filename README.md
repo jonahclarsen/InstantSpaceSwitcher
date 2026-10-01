@@ -32,11 +32,24 @@ shortcuts in **System Settings → Keyboard → Keyboard Shortcuts → Mission C
 Otherwise the native shortcuts may retain the normal animation regardless of the
 app's speed setting. Re-enable them there if you stop using this app.
 
-Command-Tab retains the native macOS chooser and Space transition animation.
-The app's animation settings apply to its Space shortcuts, CLI, and optional
-trackpad swipe override. An experimental Command-Tab override was removed:
-holding and replaying the Command-key release introduced sticky or unresponsive
-keyboard input and did not reliably accelerate the native transition.
+Command-Tab retains the native macOS chooser. **Settings → General → Use animation
+settings when switching apps** applies the selected slide to cross-Space app
+activation, including Command-Tab and Dock clicks. It is enabled by default.
+The app observes activation, resolves the focused window's Space and display,
+and posts the existing asynchronous swipe. Keyboard input is never held or
+replayed. Window lookup runs on a background queue with a short Accessibility
+timeout; rapid selections discard stale lookups.
+Physical Space swipes and Control-arrow navigation suppress activation following
+while the desktop settles, so the new focus cannot undo a manual Space change.
+An explicit Command-Tab selection or mouse click clears that suppression.
+
+While enabled and Accessibility is granted, the app temporarily disables the
+native app-activation Space jump through a WindowServer session preference.
+Saved macOS preferences are unchanged, and Dock is not restarted. Disabling the
+option or quitting restores the saved native behavior; a separate helper also
+restores it if the app crashes. This uses private macOS APIs and has been tested
+on macOS 26.6.2. The earlier approach that held and replayed Command release was
+removed because it caused sticky or unresponsive keyboard input.
 
 https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
