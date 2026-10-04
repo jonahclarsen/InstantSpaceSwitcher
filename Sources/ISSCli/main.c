@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
 
 static void print_usage(const char *progName) {
@@ -58,6 +59,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.3, false);
     iss_destroy();
     return 0;
 }
