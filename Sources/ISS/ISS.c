@@ -94,7 +94,9 @@ static bool gestures_in_flight(void) {
 }
 
 static bool get_prediction(const char *displayID, unsigned int *outIndex) {
-    if (!displayID || !predictionsDict) return false;
+    if (!displayID || !predictionsDict) {
+        return false;
+    }
     if (!gestures_in_flight()) {
         CFDictionaryRemoveAllValues(predictionsDict);
         return false;
@@ -112,7 +114,9 @@ static bool get_prediction(const char *displayID, unsigned int *outIndex) {
 }
 
 static void set_prediction(const char *displayID, unsigned int index) {
-    if (!displayID || !predictionsDict) return;
+    if (!displayID || !predictionsDict) {
+        return;
+    }
     
     CFStringRef key = CFStringCreateWithCString(NULL, displayID, kCFStringEncodingUTF8);
     CFNumberRef val = CFNumberCreate(NULL, kCFNumberIntType, &index);
@@ -131,8 +135,7 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
 static ISSDirection iss_direction_from_gesture_value(double value) {
-    // Physical trackpad input keeps the legacy sign convention on macOS 27.
-    // Only the synthetic output event below needs its sign inverted.
+    // Map the intercepted gesture value to the app's logical direction.
     return value > 0.0 ? ISSDirectionRight : ISSDirectionLeft;
 }
 
