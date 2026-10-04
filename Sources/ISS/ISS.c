@@ -130,6 +130,12 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
+static ISSDirection iss_direction_from_gesture_value(double value) {
+    // Physical trackpad input keeps the legacy sign convention on macOS 27.
+    // Only the synthetic output event below needs its sign inverted.
+    return value > 0.0 ? ISSDirectionRight : ISSDirectionLeft;
+}
+
 // Perform a swipe-override switch: get space info, compute target, switch,
 // and notify the handler with the target index.
 static void swipe_override_switch(ISSDirection dir) {
@@ -211,8 +217,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 double progress =
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeProgress);
                 if (progress != 0.0) {
-                    ISSDirection dir =
-                        progress > 0 ? ISSDirectionRight : ISSDirectionLeft;
+                    ISSDirection dir = iss_direction_from_gesture_value(progress);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }
@@ -226,8 +231,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 double velocity =
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeVelocityX);
                 if (velocity != 0.0) {
-                    ISSDirection dir =
-                        velocity > 0 ? ISSDirectionRight : ISSDirectionLeft;
+                    ISSDirection dir = iss_direction_from_gesture_value(velocity);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }
@@ -688,6 +692,11 @@ bool iss_init(void) {
     }
 
     globalSource = CFMachPortCreateRunLoopSource(NULL, globalTap, 0);
+    if (!globalSource) {
+        CFRelease(globalTap);
+        globalTap = NULL;
+        return false;
+    }
     CFRunLoopAddSource(CFRunLoopGetMain(), globalSource, kCFRunLoopCommonModes);
     CGEventTapEnable(globalTap, true);
 

@@ -46,6 +46,14 @@ typedef struct {
 
 #pragma pack(pop)
 
+_Static_assert(sizeof(IOHIDEventBase) == 16, "unexpected IOHID event base layout");
+_Static_assert(sizeof(IOHIDFluidTouchGestureData) == 40,
+               "unexpected IOHID fluid gesture layout");
+_Static_assert(sizeof(IOHIDVelocityEventData) == 28,
+               "unexpected IOHID velocity layout");
+_Static_assert(sizeof(IOHIDSystemQueueElementHeader) == 28,
+               "unexpected IOHID queue header layout");
+
 static const uint32_t kIOHIDEventTypeVelocity = 9;
 static const uint32_t kIOHIDEventTypeFluidTouchGesture = 23;
 static const uint16_t kIOHIDGestureFlavorDockPrimary = 3;
@@ -195,7 +203,7 @@ bool iss_requires_event_augmentation(void) {
         return cached_result;
     }
 
-    char version[32];
+    char version[32] = {0};
     size_t size = sizeof(version);
     if (sysctlbyname("kern.osproductversion", version, &size, NULL, 0) != 0) {
         cached_result = 0;
