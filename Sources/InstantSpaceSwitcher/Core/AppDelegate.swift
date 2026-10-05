@@ -224,6 +224,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     hotkeyStore.$space10Hotkey.receive(on: RunLoop.main).sink { [weak self] in
       self?.registerHotkey(for: .space10, combination: $0)
     }.store(in: &cancellables)
+    hotkeyStore.$space11Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space11, combination: $0)
+    }.store(in: &cancellables)
+    hotkeyStore.$space12Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space12, combination: $0)
+    }.store(in: &cancellables)
+    hotkeyStore.$space13Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space13, combination: $0)
+    }.store(in: &cancellables)
+    hotkeyStore.$space14Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space14, combination: $0)
+    }.store(in: &cancellables)
+    hotkeyStore.$space15Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space15, combination: $0)
+    }.store(in: &cancellables)
+    hotkeyStore.$space16Hotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .space16, combination: $0)
+    }.store(in: &cancellables)
     hotkeyStore.$spaceLastSpaceHotkey.receive(on: RunLoop.main).sink { [weak self] in
       self?.registerHotkey(for: .lastSpace, combination: $0)
     }.store(in: &cancellables)
@@ -284,6 +302,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.performSpaceSwitchToIndex(8)
       case .space10:
         self.performSpaceSwitchToIndex(9)
+      case .space11:
+        self.performSpaceSwitchToIndex(10)
+      case .space12:
+        self.performSpaceSwitchToIndex(11)
+      case .space13:
+        self.performSpaceSwitchToIndex(12)
+      case .space14:
+        self.performSpaceSwitchToIndex(13)
+      case .space15:
+        self.performSpaceSwitchToIndex(14)
+      case .space16:
+        self.performSpaceSwitchToIndex(15)
       case .lastSpace:
         self.performSpaceLastSpace()
       }
