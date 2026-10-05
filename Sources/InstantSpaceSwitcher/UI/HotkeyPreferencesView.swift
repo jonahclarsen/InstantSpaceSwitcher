@@ -282,6 +282,18 @@ final class HotkeyPreferencesView: NSView {
       store.update(.defaultForSpace(9), for: .space9)
     case .space10:
       store.update(.defaultForSpace(10), for: .space10)
+    case .space11:
+      store.update(.defaultForSpace(11), for: .space11)
+    case .space12:
+      store.update(.defaultForSpace(12), for: .space12)
+    case .space13:
+      store.update(.defaultForSpace(13), for: .space13)
+    case .space14:
+      store.update(.defaultForSpace(14), for: .space14)
+    case .space15:
+      store.update(.defaultForSpace(15), for: .space15)
+    case .space16:
+      store.update(.defaultForSpace(16), for: .space16)
     case .lastSpace:
       store.update(.defaultLastSpace, for: .lastSpace)
     }

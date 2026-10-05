@@ -147,6 +147,15 @@ struct HotkeyCombination: Codable, Equatable {
       keyCode = UInt32(kVK_ANSI_0)
       displayKey = "0"
       keyEquivalent = "0"
+    case 11...16:
+      let functionKey = number - 11
+      let functionKeyCodes = [
+        UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3),
+        UInt32(kVK_F4), UInt32(kVK_F5), UInt32(kVK_F6),
+      ]
+      keyCode = functionKeyCodes[functionKey]
+      displayKey = "F\(functionKey + 1)"
+      keyEquivalent = String(Character(UnicodeScalar(NSF1FunctionKey + functionKey)!))
     default: fatalError("Invalid space number")
     }
 
@@ -320,6 +329,7 @@ enum HotkeyIdentifier: String, CaseIterable {
   case right
   case space1, space2, space3, space4, space5
   case space6, space7, space8, space9, space10
+  case space11, space12, space13, space14, space15, space16
   case lastSpace
   
   var displayName: String {
@@ -336,6 +346,12 @@ enum HotkeyIdentifier: String, CaseIterable {
     case .space8: return "Switch to space 8"
     case .space9: return "Switch to space 9"
     case .space10: return "Switch to space 10"
+    case .space11: return "Switch to space 11"
+    case .space12: return "Switch to space 12"
+    case .space13: return "Switch to space 13"
+    case .space14: return "Switch to space 14"
+    case .space15: return "Switch to space 15"
+    case .space16: return "Switch to space 16"
     case .lastSpace: return "Switch to last used space"
     }
   }
@@ -356,6 +372,12 @@ final class HotkeyStore: ObservableObject {
   @Published private(set) var space8Hotkey: HotkeyCombination
   @Published private(set) var space9Hotkey: HotkeyCombination
   @Published private(set) var space10Hotkey: HotkeyCombination
+  @Published private(set) var space11Hotkey: HotkeyCombination
+  @Published private(set) var space12Hotkey: HotkeyCombination
+  @Published private(set) var space13Hotkey: HotkeyCombination
+  @Published private(set) var space14Hotkey: HotkeyCombination
+  @Published private(set) var space15Hotkey: HotkeyCombination
+  @Published private(set) var space16Hotkey: HotkeyCombination
   @Published private(set) var spaceLastSpaceHotkey: HotkeyCombination
   @Published private(set) var enabledStates: [HotkeyIdentifier: Bool] = [:]
 
@@ -375,6 +397,12 @@ final class HotkeyStore: ObservableObject {
     space8Hotkey = defaults.hotkey(forKey: DefaultsKey.space8.rawValue) ?? .defaultForSpace(8)
     space9Hotkey = defaults.hotkey(forKey: DefaultsKey.space9.rawValue) ?? .defaultForSpace(9)
     space10Hotkey = defaults.hotkey(forKey: DefaultsKey.space10.rawValue) ?? .defaultForSpace(10)
+    space11Hotkey = defaults.hotkey(forKey: DefaultsKey.space11.rawValue) ?? .defaultForSpace(11)
+    space12Hotkey = defaults.hotkey(forKey: DefaultsKey.space12.rawValue) ?? .defaultForSpace(12)
+    space13Hotkey = defaults.hotkey(forKey: DefaultsKey.space13.rawValue) ?? .defaultForSpace(13)
+    space14Hotkey = defaults.hotkey(forKey: DefaultsKey.space14.rawValue) ?? .defaultForSpace(14)
+    space15Hotkey = defaults.hotkey(forKey: DefaultsKey.space15.rawValue) ?? .defaultForSpace(15)
+    space16Hotkey = defaults.hotkey(forKey: DefaultsKey.space16.rawValue) ?? .defaultForSpace(16)
     spaceLastSpaceHotkey = defaults.hotkey(forKey: DefaultsKey.lastSpace.rawValue) ?? .defaultLastSpace
 
     for identifier in HotkeyIdentifier.allCases {
@@ -433,6 +461,30 @@ final class HotkeyStore: ObservableObject {
       guard combination != space10Hotkey else { return }
       space10Hotkey = combination
       defaults.setHotkey(combination, forKey: DefaultsKey.space10.rawValue)
+    case .space11:
+      guard combination != space11Hotkey else { return }
+      space11Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space11.rawValue)
+    case .space12:
+      guard combination != space12Hotkey else { return }
+      space12Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space12.rawValue)
+    case .space13:
+      guard combination != space13Hotkey else { return }
+      space13Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space13.rawValue)
+    case .space14:
+      guard combination != space14Hotkey else { return }
+      space14Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space14.rawValue)
+    case .space15:
+      guard combination != space15Hotkey else { return }
+      space15Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space15.rawValue)
+    case .space16:
+      guard combination != space16Hotkey else { return }
+      space16Hotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.space16.rawValue)
     case .lastSpace:
       guard combination != spaceLastSpaceHotkey else { return }
       spaceLastSpaceHotkey = combination
@@ -453,6 +505,12 @@ final class HotkeyStore: ObservableObject {
     space8Hotkey = .defaultForSpace(8)
     space9Hotkey = .defaultForSpace(9)
     space10Hotkey = .defaultForSpace(10)
+    space11Hotkey = .defaultForSpace(11)
+    space12Hotkey = .defaultForSpace(12)
+    space13Hotkey = .defaultForSpace(13)
+    space14Hotkey = .defaultForSpace(14)
+    space15Hotkey = .defaultForSpace(15)
+    space16Hotkey = .defaultForSpace(16)
     spaceLastSpaceHotkey = .defaultLastSpace
 
     defaults.setHotkey(leftHotkey, forKey: DefaultsKey.left.rawValue)
@@ -467,6 +525,12 @@ final class HotkeyStore: ObservableObject {
     defaults.setHotkey(space8Hotkey, forKey: DefaultsKey.space8.rawValue)
     defaults.setHotkey(space9Hotkey, forKey: DefaultsKey.space9.rawValue)
     defaults.setHotkey(space10Hotkey, forKey: DefaultsKey.space10.rawValue)
+    defaults.setHotkey(space11Hotkey, forKey: DefaultsKey.space11.rawValue)
+    defaults.setHotkey(space12Hotkey, forKey: DefaultsKey.space12.rawValue)
+    defaults.setHotkey(space13Hotkey, forKey: DefaultsKey.space13.rawValue)
+    defaults.setHotkey(space14Hotkey, forKey: DefaultsKey.space14.rawValue)
+    defaults.setHotkey(space15Hotkey, forKey: DefaultsKey.space15.rawValue)
+    defaults.setHotkey(space16Hotkey, forKey: DefaultsKey.space16.rawValue)
     defaults.setHotkey(spaceLastSpaceHotkey, forKey: DefaultsKey.lastSpace.rawValue)
   }
 
@@ -484,6 +548,12 @@ final class HotkeyStore: ObservableObject {
     case .space8: return space8Hotkey
     case .space9: return space9Hotkey
     case .space10: return space10Hotkey
+    case .space11: return space11Hotkey
+    case .space12: return space12Hotkey
+    case .space13: return space13Hotkey
+    case .space14: return space14Hotkey
+    case .space15: return space15Hotkey
+    case .space16: return space16Hotkey
     case .lastSpace: return spaceLastSpaceHotkey
     }
   }
@@ -511,6 +581,12 @@ final class HotkeyStore: ObservableObject {
     case space8 = "hotkey.space8"
     case space9 = "hotkey.space9"
     case space10 = "hotkey.space10"
+    case space11 = "hotkey.space11"
+    case space12 = "hotkey.space12"
+    case space13 = "hotkey.space13"
+    case space14 = "hotkey.space14"
+    case space15 = "hotkey.space15"
+    case space16 = "hotkey.space16"
     case lastSpace = "hotkey.lastSpace"
   }
 }

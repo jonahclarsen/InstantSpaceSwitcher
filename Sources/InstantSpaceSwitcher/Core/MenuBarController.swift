@@ -182,6 +182,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case 8: return .space8
     case 9: return .space9
     case 10: return .space10
+    case 11: return .space11
+    case 12: return .space12
+    case 13: return .space13
+    case 14: return .space14
+    case 15: return .space15
+    case 16: return .space16
     default: return nil
     }
   }
