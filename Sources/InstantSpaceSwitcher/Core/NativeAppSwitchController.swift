@@ -106,6 +106,11 @@ final class NativeAppSwitchController {
     restoreSessionPreference()
   }
 
+  /// Our own hotkeys consume their key before the ISS tap can observe it.
+  func noteSpaceNavigation() {
+    observed(ISSUserInputSpaceNavigation)
+  }
+
   private func observed(_ input: ISSUserInput) {
     let now = ProcessInfo.processInfo.systemUptime
     if input == ISSUserInputSpaceNavigation {
