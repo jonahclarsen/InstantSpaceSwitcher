@@ -321,6 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitch(_ direction: ISSDirection) {
+    nativeAppSwitchController.noteSpaceNavigation()
     if UserDefaults.standard.bool(forKey: "wrapAroundSpaces") {
       var info = ISSSpaceInfo()
       if iss_get_space_info(&info), info.spaceCount > 1, !iss_can_move(info, direction) {
@@ -337,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
+    nativeAppSwitchController.noteSpaceNavigation()
     if !iss_switch_to_index(index) {
       NSSound.beep()
       return
@@ -428,6 +430,7 @@ extension AppDelegate: MenuBarControllerDelegate {
   func menuBarController(
     _ controller: MenuBarController, didRequestSwitchToSpaceAtIndex index: UInt32
   ) {
+    nativeAppSwitchController.noteSpaceNavigation()
     if !iss_switch_to_index(index) {
       NSSound.beep()
     }
