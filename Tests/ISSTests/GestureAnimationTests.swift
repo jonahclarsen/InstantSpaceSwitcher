@@ -4,9 +4,12 @@ import XCTest
 
 @_silgen_name("iss_start_switch_animation")
 private func startAnimation(
-  _ direction: ISSDirection, _ speed: Double,
+  _ direction: ISSDirection, _ speed: Double, _ spaceCount: UInt32,
   _ post: @convention(c) (CGEvent) -> Void
 ) -> Bool
+
+@_silgen_name("iss_swipe_travel_for_space_count")
+private func swipeTravel(_ spaceCount: UInt32) -> Double
 
 private struct SwipeSample {
   let phase: Int64
@@ -40,7 +43,7 @@ final class GestureAnimationTests: XCTestCase {
   }
 
   func testFastSlideIsAsynchronousAndReachesDestinationBeforeRelease() {
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, 2, captureSwipe))
     XCTAssertEqual(samples.map(\.phase), [1], "Starting a slide must not block the UI")
     iss_wait_for_pending_switch()
 
@@ -70,8 +73,8 @@ final class GestureAnimationTests: XCTestCase {
   }
 
   func testReverseRequestFinishesOldGestureBeforeBeginningNewOne() {
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, captureSwipe))
-    XCTAssertTrue(startAnimation(ISSDirectionLeft, 80, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, 2, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionLeft, 80, 2, captureSwipe))
     XCTAssertEqual(samples.map(\.phase), [1, 2, 4, 1])
     XCTAssertEqual(samples[2].progress, 2)
     XCTAssertEqual(samples[2].velocity, 2000, "Interruption should finish the old gesture immediately")
@@ -82,7 +85,7 @@ final class GestureAnimationTests: XCTestCase {
   }
 
   func testInstantKeepsOriginalThreeEventSequence() {
-    XCTAssertTrue(startAnimation(ISSDirectionLeft, 2000, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionLeft, 2000, 2, captureSwipe))
     XCTAssertEqual(samples.map(\.phase), [1, 2, 4])
     XCTAssertTrue(samples.allSatisfy { abs($0.progress) < 1e-30 && $0.velocity == -2000 })
     iss_wait_for_pending_switch()
@@ -90,7 +93,7 @@ final class GestureAnimationTests: XCTestCase {
   }
 
   func testShutdownClosesGestureAndRemovesTimer() {
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, 2, captureSwipe))
     iss_destroy()
     XCTAssertEqual(samples.map(\.phase), [1, 2, 4])
     CFRunLoopRunInMode(.defaultMode, 0.04, false)
@@ -98,13 +101,25 @@ final class GestureAnimationTests: XCTestCase {
   }
 
   func testInvalidSpeedDoesNotInterruptPendingGesture() {
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, 2, captureSwipe))
     for speed in [0, -1, Double.nan, Double.infinity] {
-      XCTAssertFalse(startAnimation(ISSDirectionLeft, speed, captureSwipe))
+      XCTAssertFalse(startAnimation(ISSDirectionLeft, speed, 2, captureSwipe))
     }
     XCTAssertEqual(samples.map(\.phase), [1])
     iss_wait_for_pending_switch()
     XCTAssertEqual(samples.last?.progress, 2)
+  }
+
+  func testTravelMatchesOneSpaceForDisplaySpaceCount() {
+    XCTAssertEqual(swipeTravel(0), 2)
+    XCTAssertEqual(swipeTravel(2), 2)
+    XCTAssertEqual(swipeTravel(3), 1.5)
+    XCTAssertEqual(swipeTravel(5), 1.25)
+    XCTAssertTrue(startAnimation(ISSDirectionLeft, 50, 3, captureSwipe))
+    iss_wait_for_pending_switch()
+    XCTAssertEqual(samples.last?.progress, -1.5)
+    XCTAssertTrue(samples.allSatisfy { $0.progress >= -1.5 },
+                  "Overshooting one Space makes the Dock spring back")
   }
 
   func testCurveShapesStayMonotonicAndAlwaysComplete() {
@@ -129,7 +144,7 @@ final class GestureAnimationTests: XCTestCase {
   func testSettingsChangesAffectNextSlideWithoutWarpingActiveSlide() {
     iss_set_animation_duration(0.12)
     iss_set_animation_curve(0, 0)
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 50, 2, captureSwipe))
     iss_set_animation_duration(0.8)
     iss_set_animation_curve(0.5, 0)
     iss_wait_for_pending_switch()
@@ -140,7 +155,7 @@ final class GestureAnimationTests: XCTestCase {
       XCTAssertEqual(sample.progress / 2, (sample.time - samples.first!.time) / 0.12, accuracy: 0.02)
     }
     samples = []
-    XCTAssertTrue(startAnimation(ISSDirectionRight, 2000, captureSwipe))
+    XCTAssertTrue(startAnimation(ISSDirectionRight, 2000, 2, captureSwipe))
     XCTAssertEqual(samples.map(\.phase), [1, 2, 4], "Instant ignores custom duration and curve")
   }
 }
