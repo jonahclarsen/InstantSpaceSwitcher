@@ -167,7 +167,7 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             bool hasActiveSpace,
                                             ISSSpaceInfo *outInfo);
 static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDisplay);
-static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
+static bool iss_perform_switch_gesture(ISSDirection direction, double velocity, unsigned int spaceCount);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
@@ -181,7 +181,7 @@ static ISSDirection iss_direction_from_gesture_value(double value) {
 static void swipe_override_switch(ISSDirection dir) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {
-        iss_perform_switch_gesture(dir, gestureSpeed);
+        iss_perform_switch_gesture(dir, gestureSpeed, 0);
         return;
     }
 
@@ -541,10 +541,15 @@ double iss_swipe_progress_for_phase(CGSGesturePhase phase, ISSDirection directio
 
 // One gesture at a time, on the main run loop. New requests finish the current
 // slide first, so repeated shortcuts cannot build up a queue of animations.
-// Dock progress is gesture travel, not a normalized desktop position. In the
-// macOS 26.6.2 trial, travel 1 reached roughly halfway before release. Keep this
-// calibration separate from the timing curve; verify it on other macOS builds.
-static const double swipeTravel = 2.0;
+// Dock progress is gesture travel, not a normalized desktop position, and the
+// travel for one Space shrinks as the display gains Spaces: 2 with two Spaces,
+// 1.5 with three (Mac Mouse Fix measured 1 + 1/(n-1)). Overshooting it makes the
+// Dock slide past the destination and spring back. Keep this calibration
+// separate from the timing curve; verify it on other macOS builds.
+double iss_swipe_travel_for_space_count(unsigned int spaceCount) {
+    return spaceCount <= 1 ? 2.0 : 1.0 + 1.0 / (spaceCount - 1);
+}
+
 static struct {
     CGEventRef event;
     CFRunLoopTimerRef timer;
@@ -553,6 +558,7 @@ static struct {
     double easeIn;
     double easeOut;
     double sign;
+    double travel;
     bool controlled;
     bool destinationPosted;
     void (*post)(CGEventRef);
@@ -598,8 +604,8 @@ static void iss_finish_animation(bool interrupted) {
     // tick. Release at rest: a huge exit velocity causes a visible acceleration
     // if the Dock has not rendered all the preceding progress yet.
     // Only interruption/shutdown should force an immediate finish.
-    if (interrupted) iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel, 0.0);
-    iss_emit_swipe(kCGSGesturePhaseEnded, swipeTravel, interrupted ? 2000.0 : 0.0);
+    if (interrupted) iss_emit_swipe(kCGSGesturePhaseChanged, animation.travel, 0.0);
+    iss_emit_swipe(kCGSGesturePhaseEnded, animation.travel, interrupted ? 2000.0 : 0.0);
     CFRelease(animation.event);
     animation.event = NULL;
 }
@@ -643,17 +649,19 @@ static void iss_animation_tick(CFRunLoopTimerRef timer, void *context) {
         // Dock forwards progress through an asynchronous dispatch source.
         // Leave one update interval between final progress and release so the
         // final changed event can be consumed before the ended event.
-        iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel, 0.0);
+        iss_emit_swipe(kCGSGesturePhaseChanged, animation.travel, 0.0);
         animation.destinationPosted = true;
         return;
     }
     double progress = iss_animation_progress(t, animation.easeIn, animation.easeOut);
-    iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel * progress, 0.0);
+    iss_emit_swipe(kCGSGesturePhaseChanged, animation.travel * progress, 0.0);
 }
 
 // Internal entry point accepts an event sink so tests can exercise the real
 // scheduling and interruption behavior without switching the user's desktop.
-bool iss_start_switch_animation(ISSDirection direction, double speed, void (*post)(CGEventRef)) {
+// spaceCount is the display's Space count, or 0 when unknown.
+bool iss_start_switch_animation(ISSDirection direction, double speed, unsigned int spaceCount,
+                                void (*post)(CGEventRef)) {
     if (!post || !isfinite(speed) || speed <= 0.0) return false;
     CGEventRef event = iss_create_dock_swipe(direction);
     if (!event) return false;
@@ -661,6 +669,7 @@ bool iss_start_switch_animation(ISSDirection direction, double speed, void (*pos
     iss_finish_animation(true);
     animation.event = event;
     animation.sign = direction == ISSDirectionRight ? 1.0 : -1.0;
+    animation.travel = iss_swipe_travel_for_space_count(spaceCount);
     animation.post = post;
     animation.controlled = speed < 2000.0;
     animation.destinationPosted = false;
@@ -802,12 +811,12 @@ static void iss_post_gesture_event(CGEventRef event) {
     CGEventPost(kCGSessionEventTap, event);
 }
 
-static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
+static bool iss_perform_switch_gesture(ISSDirection direction, double velocity, unsigned int spaceCount) {
     lastGestureTime = CFAbsoluteTimeGetCurrent();
     if (iss_requires_event_augmentation()) {
         return iss_perform_augmented_switch_gesture(direction);
     }
-    return iss_start_switch_animation(direction, velocity, iss_post_gesture_event);
+    return iss_start_switch_animation(direction, velocity, spaceCount, iss_post_gesture_event);
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result
@@ -976,7 +985,7 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
     if (iss_should_block_switch(info, direction)) {
         return false;
     }
-    if (!iss_perform_switch_gesture(direction, gestureSpeed)) {
+    if (!iss_perform_switch_gesture(direction, gestureSpeed, info->spaceCount)) {
         return false;
     }
 
@@ -998,7 +1007,7 @@ bool iss_switch(ISSDirection direction) {
         return true;
     }
 
-    return iss_perform_switch_gesture(direction, gestureSpeed);
+    return iss_perform_switch_gesture(direction, gestureSpeed, 0);
 }
 
 bool iss_switch_to_index(unsigned int targetIndex) {
@@ -1028,7 +1037,7 @@ bool iss_switch_to_index(unsigned int targetIndex) {
     double velocity = gestureSpeed * steps;
 
     for (unsigned int i = 0; i < steps; i++) {
-        if (!iss_perform_switch_gesture(direction, velocity)) {
+        if (!iss_perform_switch_gesture(direction, velocity, info.spaceCount)) {
             return false;
         }
     }
@@ -1135,7 +1144,7 @@ bool iss_switch_to_window(unsigned int windowID) {
     unsigned int steps = target > current ? target - current : current - target;
     bool success = true;
     for (unsigned int step = 0; step < steps; step++) {
-        if (!iss_perform_switch_gesture(direction, gestureSpeed * steps)) {
+        if (!iss_perform_switch_gesture(direction, gestureSpeed * steps, info.spaceCount)) {
             success = false;
             break;
         }
